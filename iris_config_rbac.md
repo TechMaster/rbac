@@ -1,0 +1,153 @@
+Certainly! I'll show you how to read the authorization rules from a configuration file instead of hard-coding them. We'll use YAML for the configuration file, as it's human-readable and widely used for configuration. We'll use the `gopkg.in/yaml.v3` package to parse the YAML file.
+
+First, let's create a YAML configuration file named `rbac_rules.yaml`:
+
+```yaml
+rules:
+  - path: "/api/book"
+    method: "GET"
+    auth: "Allow"
+    roles: ["roleA", "roleB"]
+  - path: "/api/book"
+    method: "POST"
+    auth: "Deny"
+    roles: ["roleB", "roleC"]
+  - path: "/api/person"
+    method: "GET"
+    auth: "AllowAll"
+  - path: "/api/person"
+    method: "DELETE"
+    auth: "DenyAll"
+```
+
+Now, let's modify the Go code to read from this configuration file:
+
+```go
+package main
+
+import (
+	"io/ioutil"
+	"log"
+
+	"github.com/kataras/iris/v12"
+	"gopkg.in/yaml.v3"
+)
+
+// ... (keep all the previous type definitions and functions)
+
+// RuleConfig represents the structure of a rule in the YAML file
+type RuleConfig struct {
+	Path   string   `yaml:"path"`
+	Method string   `yaml:"method"`
+	Auth   string   `yaml:"auth"`
+	Roles  []string `yaml:"roles,omitempty"`
+}
+
+// Config represents the structure of the YAML configuration file
+type Config struct {
+	Rules []RuleConfig `yaml:"rules"`
+}
+
+// LoadRulesFromFile loads RBAC rules from a YAML file
+func LoadRulesFromFile(filename string) ([]Rule, error) {
+	data, err := ioutil.ReadFile(filename)
+	if err != nil {
+		return nil, err
+	}
+
+	var config Config
+	err = yaml.Unmarshal(data, &config)
+	if err != nil {
+		return nil, err
+	}
+
+	var rules []Rule
+	for _, rc := range config.Rules {
+		var auth AuthFunc
+		switch rc.Auth {
+		case "Allow":
+			auth = Allow(stringsToRoles(rc.Roles)...)
+		case "Deny":
+			auth = Deny(stringsToRoles(rc.Roles)...)
+		case "AllowAll":
+			auth = AllowAll()
+		case "DenyAll":
+			auth = DenyAll()
+		default:
+			log.Printf("Unknown auth type: %s", rc.Auth)
+			continue
+		}
+		rules = append(rules, Rule{Path: rc.Path, Method: rc.Method, Auth: auth})
+	}
+
+	return rules, nil
+}
+
+// Helper function to convert []string to []Role
+func stringsToRoles(s []string) []Role {
+	roles := make([]Role, len(s))
+	for i, v := range s {
+		roles[i] = Role(v)
+	}
+	return roles
+}
+
+func main() {
+	app := iris.New()
+
+	// Load RBAC rules from configuration file
+	rules, err := LoadRulesFromFile("rbac_rules.yaml")
+	if err != nil {
+		log.Fatalf("Failed to load RBAC rules: %v", err)
+	}
+
+	// Apply RBAC middleware
+	app.Use(RBACMiddleware(rules))
+
+	// Define routes
+	app.Get("/api/book", func(ctx iris.Context) {
+		ctx.JSON(iris.Map{"message": "Get Book"})
+	})
+
+	app.Post("/api/book", func(ctx iris.Context) {
+		ctx.JSON(iris.Map{"message": "Create Book"})
+	})
+
+	app.Get("/api/person", func(ctx iris.Context) {
+		ctx.JSON(iris.Map{"message": "Get Person"})
+	})
+
+	app.Delete("/api/person", func(ctx iris.Context) {
+		ctx.JSON(iris.Map{"message": "Delete Person"})
+	})
+
+	// Start the server
+	app.Listen(":8080")
+}
+```
+
+To use this updated code, you'll need to install the YAML package:
+
+```
+go get gopkg.in/yaml.v3
+```
+
+### Explanation of changes:
+
+1. We defined `RuleConfig` and `Config` structs to match the structure of our YAML file.
+
+2. We created a `LoadRulesFromFile` function that reads the YAML file, unmarshals it into our config structs, and then converts the config into our `Rule` structs with the appropriate `AuthFunc`.
+
+3. We added a helper function `stringsToRoles` to convert string slices to `Role` slices.
+
+4. In the `main` function, we now load the rules from the YAML file instead of hard-coding them.
+
+This approach offers several benefits:
+
+- It separates the configuration from the code, making it easier to modify rules without changing the application code.
+- It's more maintainable, especially as the number of rules grows.
+- It allows for easier testing and deployment across different environments.
+
+Remember to place the `rbac_rules.yaml` file in the same directory as your Go executable, or provide the full path to the file in the `LoadRulesFromFile` function call.
+
+This implementation provides a flexible way to manage RBAC rules through a configuration file while maintaining the functionality of the original code.
