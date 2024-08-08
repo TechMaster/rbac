@@ -1,0 +1,148 @@
+Certainly! I'll modify the code to read a plain text configuration file with the format you specified. Each line in the file represents a rule, with parameters separated by commas. Here's the improved version of the code:
+
+First, let's create a configuration file named `rbac_rules.txt` with the following content:
+
+```
+/api/book,GET,Allow,[roleA,roleB]
+/api/book,POST,Deny,[roleB,roleC]
+/api/person,GET,AllowAll
+/api/person,DELETE,DenyAll
+```
+
+Now, let's modify the Go code to read from this configuration file:
+
+```go
+package main
+
+import (
+	"bufio"
+	"fmt"
+	"log"
+	"os"
+	"strings"
+
+	"github.com/kataras/iris/v12"
+)
+
+// ... (keep all the previous type definitions and functions for Role, Rule, AuthFunc, User, Allow, Deny, AllowAll, DenyAll, RBACMiddleware, and getUserFromContext)
+
+// LoadRulesFromFile loads RBAC rules from a plain text file
+func LoadRulesFromFile(filename string) ([]Rule, error) {
+	file, err := os.Open(filename)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	var rules []Rule
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := scanner.Text()
+		rule, err := parseRule(line)
+		if err != nil {
+			log.Printf("Error parsing rule: %v", err)
+			continue
+		}
+		rules = append(rules, rule)
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+
+	return rules, nil
+}
+
+// parseRule parses a single line of the configuration file into a Rule
+func parseRule(line string) (Rule, error) {
+	parts := strings.Split(line, ",")
+	if len(parts) < 3 {
+		return Rule{}, fmt.Errorf("invalid rule format: %s", line)
+	}
+
+	path := strings.TrimSpace(parts[0])
+	method := strings.TrimSpace(parts[1])
+	authType := strings.TrimSpace(parts[2])
+
+	var auth AuthFunc
+	var roles []Role
+
+	if len(parts) > 3 {
+		rolesStr := strings.TrimSpace(parts[3])
+		rolesStr = strings.Trim(rolesStr, "[]")
+		for _, role := range strings.Split(rolesStr, " ") {
+			roles = append(roles, Role(strings.TrimSpace(role)))
+		}
+	}
+
+	switch authType {
+	case "Allow":
+		auth = Allow(roles...)
+	case "Deny":
+		auth = Deny(roles...)
+	case "AllowAll":
+		auth = AllowAll()
+	case "DenyAll":
+		auth = DenyAll()
+	default:
+		return Rule{}, fmt.Errorf("unknown auth type: %s", authType)
+	}
+
+	return Rule{Path: path, Method: method, Auth: auth}, nil
+}
+
+func main() {
+	app := iris.New()
+
+	// Load RBAC rules from configuration file
+	rules, err := LoadRulesFromFile("rbac_rules.txt")
+	if err != nil {
+		log.Fatalf("Failed to load RBAC rules: %v", err)
+	}
+
+	// Apply RBAC middleware
+	app.Use(RBACMiddleware(rules))
+
+	// Define routes
+	app.Get("/api/book", func(ctx iris.Context) {
+		ctx.JSON(iris.Map{"message": "Get Book"})
+	})
+
+	app.Post("/api/book", func(ctx iris.Context) {
+		ctx.JSON(iris.Map{"message": "Create Book"})
+	})
+
+	app.Get("/api/person", func(ctx iris.Context) {
+		ctx.JSON(iris.Map{"message": "Get Person"})
+	})
+
+	app.Delete("/api/person", func(ctx iris.Context) {
+		ctx.JSON(iris.Map{"message": "Delete Person"})
+	})
+
+	// Start the server
+	app.Listen(":8080")
+}
+```
+
+### Explanation of changes:
+
+1. We've replaced the YAML configuration with a plain text file format.
+
+2. The `LoadRulesFromFile` function now reads the file line by line using a `bufio.Scanner`.
+
+3. We've added a new `parseRule` function that parses each line of the configuration file into a `Rule` struct.
+
+4. The parsing logic handles the different formats for rules with and without roles.
+
+5. We've removed the dependency on the YAML package, making the code simpler and reducing external dependencies.
+
+This implementation offers several benefits:
+
+- It uses a simple, easy-to-read configuration format.
+- It's more flexible, allowing for easy modification of rules without changing the application code.
+- It doesn't require any external parsing libraries, reducing dependencies.
+
+Remember to place the `rbac_rules.txt` file in the same directory as your Go executable, or provide the full path to the file in the `LoadRulesFromFile` function call.
+
+This implementation provides a straightforward way to manage RBAC rules through a plain text configuration file while maintaining the functionality of the original code. It's easy for administrators to update the rules without needing to understand YAML or more complex configuration formats.
